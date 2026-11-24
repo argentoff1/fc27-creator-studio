@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QAbstractItemView,
     QComboBox,
+    QSlider,
     QInputDialog,
     QMessageBox,
 )
@@ -173,6 +174,42 @@ class EditorSequenceController:
         self.output_format_label.setObjectName("Subtitle")
         framing_layout.addWidget(self.output_format_label, 1)
 
+        crop_position_layout = QVBoxLayout()
+        crop_x_layout = QHBoxLayout()
+        crop_x_layout.addWidget(QLabel("Положение по горизонтали:"))
+        self.crop_x_slider = QSlider(Qt.Orientation.Horizontal)
+        self.crop_x_slider.setRange(0, 100)
+        self.crop_x_slider.setSingleStep(1)
+        self.crop_x_slider.setPageStep(10)
+        self.crop_x_value_label = QLabel("50%")
+        self.crop_x_value_label.setMinimumWidth(42)
+        crop_x_layout.addWidget(self.crop_x_slider, 1)
+        crop_x_layout.addWidget(self.crop_x_value_label)
+        crop_position_layout.addLayout(crop_x_layout)
+
+        crop_y_layout = QHBoxLayout()
+        crop_y_layout.addWidget(QLabel("Положение по вертикали:"))
+        self.crop_y_slider = QSlider(Qt.Orientation.Horizontal)
+        self.crop_y_slider.setRange(0, 100)
+        self.crop_y_slider.setSingleStep(1)
+        self.crop_y_slider.setPageStep(10)
+        self.crop_y_value_label = QLabel("50%")
+        self.crop_y_value_label.setMinimumWidth(42)
+        crop_y_layout.addWidget(self.crop_y_slider, 1)
+        crop_y_layout.addWidget(self.crop_y_value_label)
+        crop_position_layout.addLayout(crop_y_layout)
+
+        crop_reset_layout = QHBoxLayout()
+        self.crop_reset_button = QPushButton("По центру")
+        self.crop_reset_button.clicked.connect(self.reset_crop_position)
+        self.crop_position_hint = QLabel(
+            "50% — центр; 0% и 100% — крайние положения области кадрирования."
+        )
+        self.crop_position_hint.setObjectName("Subtitle")
+        crop_reset_layout.addWidget(self.crop_reset_button)
+        crop_reset_layout.addWidget(self.crop_position_hint, 1)
+        crop_position_layout.addLayout(crop_reset_layout)
+
         self._loading_export_settings = True
         self.load_export_settings()
         self._loading_export_settings = False
@@ -184,6 +221,10 @@ class EditorSequenceController:
             self.framing_combo,
         ):
             combo.currentIndexChanged.connect(self.on_export_setting_changed)
+
+        self.crop_x_slider.valueChanged.connect(self.on_crop_position_changed)
+        self.crop_y_slider.valueChanged.connect(self.on_crop_position_changed)
+        self.update_crop_controls_enabled()
 
         export_layout = QHBoxLayout()
         self.sequence_info = QLabel("Фрагментов в сборке: 0")
@@ -201,6 +242,7 @@ class EditorSequenceController:
         group_layout.addLayout(sequence_extra_layout)
         group_layout.addLayout(settings_layout)
         group_layout.addLayout(framing_layout)
+        group_layout.addLayout(crop_position_layout)
         group_layout.addLayout(export_layout)
         layout.addWidget(group)
 
@@ -595,6 +637,12 @@ class EditorSequenceController:
         saved_fps = str(settings.value("editor/export/fps", "60"))
         saved_quality = str(settings.value("editor/export/quality", "20"))
         saved_framing = str(settings.value("editor/export/framing", "crop"))
+        saved_crop_x = self._safe_crop_value(
+            settings.value("editor/export/crop_x", 50)
+        )
+        saved_crop_y = self._safe_crop_value(
+            settings.value("editor/export/crop_y", 50)
+        )
 
         for combo, value in (
             (self.profile_combo, saved_profile),
@@ -606,13 +654,53 @@ class EditorSequenceController:
             index = combo.findData(value)
             combo.setCurrentIndex(index if index >= 0 else 0)
 
+        self.crop_x_slider.setValue(saved_crop_x)
+        self.crop_y_slider.setValue(saved_crop_y)
         self.update_output_format_label()
+        self.update_crop_position_labels()
+        self.update_crop_controls_enabled()
+
+    @staticmethod
+    def _safe_crop_value(value):
+        try:
+            return max(0, min(100, int(value)))
+        except (TypeError, ValueError):
+            return 50
 
     def on_export_setting_changed(self, *args):
         if self._loading_export_settings:
             return
         self.save_export_settings()
         self.update_output_format_label()
+        self.update_crop_controls_enabled()
+
+    def on_crop_position_changed(self, *args):
+        if self._loading_export_settings:
+            return
+        self.update_crop_position_labels()
+        self.save_export_settings()
+
+    def update_crop_position_labels(self):
+        self.crop_x_value_label.setText(f"{self.crop_x_slider.value()}%")
+        self.crop_y_value_label.setText(f"{self.crop_y_slider.value()}%")
+
+    def update_crop_controls_enabled(self):
+        crop_enabled = self.framing_combo.currentData() == "crop"
+        for widget in (
+            self.crop_x_slider,
+            self.crop_y_slider,
+            self.crop_reset_button,
+        ):
+            widget.setEnabled(crop_enabled and self.process is None)
+        self.crop_position_hint.setText(
+            "50% — центр; 0% и 100% — крайние положения области кадрирования."
+            if crop_enabled else
+            "При режиме «Вписать целиком» положение кадра не используется."
+        )
+
+    def reset_crop_position(self):
+        self.crop_x_slider.setValue(50)
+        self.crop_y_slider.setValue(50)
 
     def save_export_settings(self):
         settings = self.window.settings
@@ -621,6 +709,8 @@ class EditorSequenceController:
         settings.setValue("editor/export/fps", self.fps_combo.currentData())
         settings.setValue("editor/export/quality", self.quality_combo.currentData())
         settings.setValue("editor/export/framing", self.framing_combo.currentData())
+        settings.setValue("editor/export/crop_x", self.crop_x_slider.value())
+        settings.setValue("editor/export/crop_y", self.crop_y_slider.value())
 
     def get_export_settings(self):
         profile = self.profile_combo.currentData()
@@ -643,6 +733,8 @@ class EditorSequenceController:
             "fps": int(self.fps_combo.currentData()),
             "crf": int(self.quality_combo.currentData()),
             "framing": self.framing_combo.currentData(),
+            "crop_x": self.crop_x_slider.value(),
+            "crop_y": self.crop_y_slider.value(),
         }
 
     def update_output_format_label(self):
@@ -662,6 +754,8 @@ class EditorSequenceController:
             self.framing_combo,
         ):
             widget.setEnabled(enabled)
+
+        self.update_crop_controls_enabled()
 
     # ------------------------------------------------------------------
     # Экспорт итогового ролика
@@ -746,6 +840,8 @@ class EditorSequenceController:
         fps = int(options["fps"])
         crf = int(options["crf"])
         framing = options.get("framing", "crop")
+        crop_x = self._safe_crop_value(options.get("crop_x", 50)) / 100
+        crop_y = self._safe_crop_value(options.get("crop_y", 50)) / 100
 
         if framing == "pad":
             video_filter = (
@@ -755,7 +851,8 @@ class EditorSequenceController:
         else:
             video_filter = (
                 f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-                f"crop={width}:{height}:(iw-ow)/2:(ih-oh)/2"
+                f"crop={width}:{height}:"
+                f"(iw-ow)*{crop_x:.3f}:(ih-oh)*{crop_y:.3f}"
             )
 
         command = ["-hide_banner", "-y", "-loglevel", "error"]
