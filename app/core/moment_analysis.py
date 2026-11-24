@@ -8,6 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import QThread, Signal
 
 from app.core.media_probe import FFMPEG_PATH, probe_video
+from app.core.scoreboard_ocr import find_score_changes
 
 
 SCENE_TIME_PATTERN = re.compile(r"pts_time:([0-9]+(?:\\.[0-9]+)?)")
@@ -53,6 +54,13 @@ class MomentAnalysisWorker(QThread):
 
         candidates = []
         errors = []
+
+        score_candidates, score_error = find_score_changes(
+            path, duration_seconds
+        )
+        candidates.extend(score_candidates)
+        if score_error:
+            errors.append(score_error)
 
         scene_candidates, scene_error = self._find_scene_changes(
             path, duration_seconds
