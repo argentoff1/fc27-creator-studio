@@ -685,7 +685,10 @@ class EditorSequenceController:
         self.crop_y_value_label.setText(f"{self.crop_y_slider.value()}%")
 
     def update_crop_controls_enabled(self):
-        crop_enabled = self.framing_combo.currentData() == "crop"
+        crop_enabled = (
+            self.framing_combo.currentData() == "crop"
+            and self.framing_combo.isEnabled()
+        )
         for widget in (
             self.crop_x_slider,
             self.crop_y_slider,
