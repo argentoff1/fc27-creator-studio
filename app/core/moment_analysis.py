@@ -7,7 +7,7 @@ from PySide6.QtCore import QThread, Signal
 from app.core.media_probe import FFMPEG_PATH, probe_video
 
 
-SCENE_TIME_PATTERN = re.compile(r"pts_time:([0-9]+(?:\\.[0-9]+)?)")
+SCENE_TIME_PATTERN = re.compile(r"pts_time:([0-9]+(?:\.[0-9]+)?)")
 
 
 class MomentAnalysisWorker(QThread):
