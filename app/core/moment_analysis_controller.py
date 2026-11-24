@@ -82,6 +82,10 @@ class MomentAnalysisController:
         self.finish_worker_ui()
 
         if candidates:
+            scoreboard_count = sum(
+                "scoreboard" in candidate.get("sources", [])
+                for candidate in candidates
+            )
             audio_count = sum(
                 "audio" in candidate.get("sources", [])
                 for candidate in candidates
@@ -92,12 +96,14 @@ class MomentAnalysisController:
             )
             self.window.analysis_status_label.setText(
                 f"Готово. Найдено кандидатов: {len(candidates)} "
-                f"(аудиосигналов: {audio_count}, смен сцен: {scene_count}). "
+                f"(изменений счёта: {scoreboard_count}, "
+                f"аудиосигналов: {audio_count}, смен сцен: {scene_count}). "
                 "Дважды щёлкни по строке, чтобы открыть момент в монтаже."
             )
         else:
             self.window.analysis_status_label.setText(
-                "Выраженных аудиовсплесков и заметных смен сцен не найдено. "
+                "Изменений счёта, выраженных аудиовсплесков и заметных смен сцен "
+                "не найдено. "
                 "Попробуй повысить чувствительность."
             )
 
