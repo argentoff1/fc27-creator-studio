@@ -134,6 +134,57 @@ class EditorSequenceController:
         sequence_extra_layout.addWidget(clear_button)
         sequence_extra_layout.addStretch()
 
+        # Настройки итогового видео.
+        settings_layout = QHBoxLayout()
+        settings_layout.addWidget(QLabel("Формат:"))
+
+        self.profile_combo = QComboBox()
+        self.profile_combo.addItem("YouTube — горизонтальный 16:9", "youtube")
+        self.profile_combo.addItem("Shorts / TikTok — вертикальный 9:16", "vertical")
+        settings_layout.addWidget(self.profile_combo, 2)
+
+        settings_layout.addWidget(QLabel("Разрешение:"))
+        self.resolution_combo = QComboBox()
+        self.resolution_combo.addItem("1080p", "1080p")
+        self.resolution_combo.addItem("720p", "720p")
+        settings_layout.addWidget(self.resolution_combo)
+
+        settings_layout.addWidget(QLabel("FPS:"))
+        self.fps_combo = QComboBox()
+        self.fps_combo.addItem("30", "30")
+        self.fps_combo.addItem("60", "60")
+        settings_layout.addWidget(self.fps_combo)
+
+        settings_layout.addWidget(QLabel("Качество:"))
+        self.quality_combo = QComboBox()
+        self.quality_combo.addItem("Высокое", "18")
+        self.quality_combo.addItem("Сбалансированное", "20")
+        self.quality_combo.addItem("Компактное", "23")
+        settings_layout.addWidget(self.quality_combo, 1)
+
+        framing_layout = QHBoxLayout()
+        framing_layout.addWidget(QLabel("Кадрирование:"))
+        self.framing_combo = QComboBox()
+        self.framing_combo.addItem("Заполнить кадр (обрезка)", "crop")
+        self.framing_combo.addItem("Вписать целиком (поля)", "pad")
+        framing_layout.addWidget(self.framing_combo, 1)
+
+        self.output_format_label = QLabel("Выходной размер: 1920 × 1080")
+        self.output_format_label.setObjectName("Subtitle")
+        framing_layout.addWidget(self.output_format_label, 1)
+
+        self._loading_export_settings = True
+        self.load_export_settings()
+        self._loading_export_settings = False
+        for combo in (
+            self.profile_combo,
+            self.resolution_combo,
+            self.fps_combo,
+            self.quality_combo,
+            self.framing_combo,
+        ):
+            combo.currentIndexChanged.connect(self.on_export_setting_changed)
+
         export_layout = QHBoxLayout()
         self.sequence_info = QLabel("Фрагментов в сборке: 0")
         self.export_button = QPushButton("Экспортировать итоговый ролик")
@@ -148,6 +199,8 @@ class EditorSequenceController:
         group_layout.addWidget(self.sequence_list)
         group_layout.addLayout(buttons_layout)
         group_layout.addLayout(sequence_extra_layout)
+        group_layout.addLayout(settings_layout)
+        group_layout.addLayout(framing_layout)
         group_layout.addLayout(export_layout)
         layout.addWidget(group)
 
@@ -532,7 +585,86 @@ class EditorSequenceController:
         self.update_project_buttons()
 
     # ------------------------------------------------------------------
-    # Экспорт итогового ролика (логика предыдущей версии)
+    # Настройки экспорта итогового ролика
+    # ------------------------------------------------------------------
+
+    def load_export_settings(self):
+        settings = self.window.settings
+        saved_profile = str(settings.value("editor/export/profile", "youtube"))
+        saved_resolution = str(settings.value("editor/export/resolution", "1080p"))
+        saved_fps = str(settings.value("editor/export/fps", "60"))
+        saved_quality = str(settings.value("editor/export/quality", "20"))
+        saved_framing = str(settings.value("editor/export/framing", "crop"))
+
+        for combo, value in (
+            (self.profile_combo, saved_profile),
+            (self.resolution_combo, saved_resolution),
+            (self.fps_combo, saved_fps),
+            (self.quality_combo, saved_quality),
+            (self.framing_combo, saved_framing),
+        ):
+            index = combo.findData(value)
+            combo.setCurrentIndex(index if index >= 0 else 0)
+
+        self.update_output_format_label()
+
+    def on_export_setting_changed(self, *args):
+        if self._loading_export_settings:
+            return
+        self.save_export_settings()
+        self.update_output_format_label()
+
+    def save_export_settings(self):
+        settings = self.window.settings
+        settings.setValue("editor/export/profile", self.profile_combo.currentData())
+        settings.setValue("editor/export/resolution", self.resolution_combo.currentData())
+        settings.setValue("editor/export/fps", self.fps_combo.currentData())
+        settings.setValue("editor/export/quality", self.quality_combo.currentData())
+        settings.setValue("editor/export/framing", self.framing_combo.currentData())
+
+    def get_export_settings(self):
+        profile = self.profile_combo.currentData()
+        resolution = self.resolution_combo.currentData()
+        if profile == "vertical":
+            dimensions = {
+                "1080p": (1080, 1920),
+                "720p": (720, 1280),
+            }
+        else:
+            dimensions = {
+                "1080p": (1920, 1080),
+                "720p": (1280, 720),
+            }
+
+        width, height = dimensions.get(resolution, dimensions["1080p"])
+        return {
+            "width": width,
+            "height": height,
+            "fps": int(self.fps_combo.currentData()),
+            "crf": int(self.quality_combo.currentData()),
+            "framing": self.framing_combo.currentData(),
+        }
+
+    def update_output_format_label(self):
+        if not hasattr(self, "output_format_label"):
+            return
+        options = self.get_export_settings()
+        self.output_format_label.setText(
+            f"Выходной размер: {options['width']} × {options['height']}"
+        )
+
+    def set_export_settings_enabled(self, enabled):
+        for widget in (
+            self.profile_combo,
+            self.resolution_combo,
+            self.fps_combo,
+            self.quality_combo,
+            self.framing_combo,
+        ):
+            widget.setEnabled(enabled)
+
+    # ------------------------------------------------------------------
+    # Экспорт итогового ролика
     # ------------------------------------------------------------------
 
     def export_sequence(self):
@@ -588,11 +720,16 @@ class EditorSequenceController:
                 return
             metadata_list.append(metadata)
 
-        command = self.build_command(paths, metadata_list, output_path)
+        export_settings = self.get_export_settings()
+        self.save_export_settings()
+        command = self.build_command(
+            paths, metadata_list, output_path, export_settings
+        )
         self.output_path = output_path
         self.export_button.setEnabled(False)
         self.export_button.setText("Сборка ролика...")
         self.project_combo.setEnabled(False)
+        self.set_export_settings_enabled(False)
         self.new_project_button.setEnabled(False)
         self.rename_project_button.setEnabled(False)
         self.delete_project_button.setEnabled(False)
@@ -602,7 +739,25 @@ class EditorSequenceController:
         self.process.errorOccurred.connect(self.on_export_error)
         self.process.start(str(FFMPEG_PATH), command)
 
-    def build_command(self, paths, metadata_list, output_path):
+    def build_command(self, paths, metadata_list, output_path, export_settings=None):
+        options = export_settings or self.get_export_settings()
+        width = int(options["width"])
+        height = int(options["height"])
+        fps = int(options["fps"])
+        crf = int(options["crf"])
+        framing = options.get("framing", "crop")
+
+        if framing == "pad":
+            video_filter = (
+                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
+            )
+        else:
+            video_filter = (
+                f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+                f"crop={width}:{height}:(iw-ow)/2:(ih-oh)/2"
+            )
+
         command = ["-hide_banner", "-y", "-loglevel", "error"]
         for path in paths:
             command.extend(["-i", str(path)])
@@ -628,9 +783,8 @@ class EditorSequenceController:
             audio_label = f"a{index}"
             filters.append(
                 f"[{index}:v:0]"
-                "scale=1920:1080:force_original_aspect_ratio=decrease,"
-                "pad=1920:1080:(ow-iw)/2:(oh-ih)/2,"
-                "fps=60,setsar=1,format=yuv420p,setpts=PTS-STARTPTS"
+                f"{video_filter},"
+                f"fps={fps},setsar=1,format=yuv420p,setpts=PTS-STARTPTS"
                 f"[{video_label}]"
             )
 
@@ -655,8 +809,8 @@ class EditorSequenceController:
         command.extend([
             "-filter_complex", ";".join(filters),
             "-map", "[outv]", "-map", "[outa]",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-            "-pix_fmt", "yuv420p", "-r", "60",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf),
+            "-pix_fmt", "yuv420p", "-r", str(fps),
             "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
             "-movflags", "+faststart", str(output_path),
         ])
@@ -665,6 +819,7 @@ class EditorSequenceController:
     def _restore_export_ui(self):
         self.export_button.setText("Экспортировать итоговый ролик")
         self.project_combo.setEnabled(True)
+        self.set_export_settings_enabled(True)
         self.new_project_button.setEnabled(True)
         self.update_buttons()
 
