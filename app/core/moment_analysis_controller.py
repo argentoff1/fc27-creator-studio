@@ -20,7 +20,7 @@ class MomentAnalysisController:
         self.window.analysis_results_table.setRowCount(0)
         self.candidates = []
         self.window.analysis_status_label.setText(
-            "Видео выбрано. Можно запускать поиск смен сцен."
+            "Видео выбрано. Будут проверены видеоряд и аудиодорожка."
         )
         self.window.analysis_start_button.setEnabled(True)
 
@@ -48,10 +48,11 @@ class MomentAnalysisController:
         self.candidates = []
         self.window.analysis_start_button.setEnabled(False)
         self.window.analysis_progress.setRange(0, 0)
-        self.window.analysis_progress.setFormat("Анализ видео...")
+        self.window.analysis_progress.setFormat("Анализ видео и звука...")
         self.window.analysis_progress.setVisible(True)
         self.window.analysis_status_label.setText(
-            "FFmpeg анализирует видеоряд. На длинной записи это может занять время."
+            "FFmpeg анализирует видеоряд и аудиодорожку. "
+            "На длинной записи это может занять время."
         )
         self.worker.start()
 
@@ -81,13 +82,22 @@ class MomentAnalysisController:
         self.finish_worker_ui()
 
         if candidates:
+            audio_count = sum(
+                "audio" in candidate.get("sources", [])
+                for candidate in candidates
+            )
+            scene_count = sum(
+                "scene" in candidate.get("sources", [])
+                for candidate in candidates
+            )
             self.window.analysis_status_label.setText(
-                f"Готово. Найдено кандидатов: {len(candidates)}. "
+                f"Готово. Найдено кандидатов: {len(candidates)} "
+                f"(аудиосигналов: {audio_count}, смен сцен: {scene_count}). "
                 "Дважды щёлкни по строке, чтобы открыть момент в монтаже."
             )
         else:
             self.window.analysis_status_label.setText(
-                "Заметных смен сцен с выбранной чувствительностью не найдено. "
+                "Выраженных аудиовсплесков и заметных смен сцен не найдено. "
                 "Попробуй повысить чувствительность."
             )
 
