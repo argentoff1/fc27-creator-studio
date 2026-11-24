@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget,
@@ -15,8 +13,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QProgressBar,
 )
-
-from app.core.moment_analysis import MomentAnalysisWorker
 
 
 def format_timestamp(seconds):
@@ -37,9 +33,10 @@ def create_ai_assistant_page(window):
     title.setObjectName("PageTitle")
 
     description = QLabel(
-        "Первый этап анализа: поиск резких смен сцен, которые могут "
-        "указывать на повторы, переходы камеры и другие заметные эпизоды. "
-        "Это предварительные кандидаты, а не автоматическое распознавание голов."
+        "Поиск предварительных кандидатов по двум сигналам: резкие "
+        "изменения видеоряда и всплески громкости в аудиодорожке. "
+        "Это помогает находить заметные эпизоды, но пока не распознаёт "
+        "голы и игровые события автоматически."
     )
     description.setObjectName("Subtitle")
     description.setWordWrap(True)
@@ -103,7 +100,7 @@ def create_ai_assistant_page(window):
     window.analysis_results_table.setColumnCount(3)
     window.analysis_results_table.setHorizontalHeaderLabels([
         "Время",
-        "Тип события",
+        "Причина обнаружения",
         "Предлагаемый фрагмент",
     ])
     window.analysis_results_table.setEditTriggers(
