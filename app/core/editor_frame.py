@@ -64,6 +64,7 @@ class EditorFrameController:
         self.process = None
         self.pending_output = None
         self.pending_frame = None
+        self.queued_frame = None
         self.cache_prefix = None
 
     def attach(self):
@@ -105,6 +106,7 @@ class EditorFrameController:
         self.has_audio = False
 
         self.cache_prefix = None
+        self.queued_frame = None
 
         self.update_timeline()
 
@@ -276,12 +278,15 @@ class EditorFrameController:
         )
 
         if output_path.is_file():
+            self.queued_frame = None
             self.display_image(output_path)
             return
 
         if self.process is not None:
+            self.queued_frame = frame_number
             return
 
+        self.queued_frame = None
         self.extract_frame(frame_number, output_path)
 
     def extract_frame(self, frame_number, output_path):
@@ -334,6 +339,7 @@ class EditorFrameController:
     def on_extraction_finished(self, exit_code, exit_status):
         process = self.process
         output_path = self.pending_output
+        extracted_frame = self.pending_frame
 
         if process is None:
             return
@@ -350,6 +356,17 @@ class EditorFrameController:
 
         self.window.editor_frame_back_button.setEnabled(True)
         self.window.editor_frame_forward_button.setEnabled(True)
+
+        if (
+            self.queued_frame is not None
+            and self.queued_frame != extracted_frame
+        ):
+            queued_frame = self.queued_frame
+            self.queued_frame = None
+            self.show_frame(queued_frame)
+            return
+
+        self.queued_frame = None
 
         if (
             exit_code == 0
