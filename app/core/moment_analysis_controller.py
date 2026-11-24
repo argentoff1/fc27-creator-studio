@@ -20,7 +20,7 @@ class MomentAnalysisController:
         self.window.analysis_results_table.setRowCount(0)
         self.candidates = []
         self.window.analysis_status_label.setText(
-            "Видео выбрано. Будут проверены видеоряд и аудиодорожка."
+            "Видео выбрано. Будут проверены табло, видеоряд и аудиодорожка."
         )
         self.window.analysis_start_button.setEnabled(True)
 
@@ -48,10 +48,10 @@ class MomentAnalysisController:
         self.candidates = []
         self.window.analysis_start_button.setEnabled(False)
         self.window.analysis_progress.setRange(0, 0)
-        self.window.analysis_progress.setFormat("Анализ видео и звука...")
+        self.window.analysis_progress.setFormat("Распознавание табло и анализ видео/звука...")
         self.window.analysis_progress.setVisible(True)
         self.window.analysis_status_label.setText(
-            "FFmpeg анализирует видеоряд и аудиодорожку. "
+            "Распознаём счёт на табло, анализируем видеоряд и аудиодорожку. "
             "На длинной записи это может занять время."
         )
         self.worker.start()
