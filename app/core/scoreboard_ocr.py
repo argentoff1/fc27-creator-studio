@@ -3,6 +3,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from app.core.media_probe import FFMPEG_PATH
+
 
 TESSERACT_PATH = Path(
     r"C:\Program Files\Tesseract-OCR\tesseract.exe"
@@ -27,12 +29,12 @@ def find_score_changes(video_path, duration_seconds):
     with tempfile.TemporaryDirectory(prefix="fc27_score_") as temp_dir:
         frame_pattern = str(Path(temp_dir) / "frame_%06d.jpg")
         command = [
-            "C:\\FC27_BLOG\\tools\\ffmpeg\\bin\\ffmpeg.exe",
+            str(FFMPEG_PATH),
             "-hide_banner",
             "-loglevel", "error",
             "-i", str(video_path),
             "-vf",
-            "fps=1,"
+            "fps=0.5,"
             "crop=trunc(iw*0.30/2)*2:trunc(ih*0.14/2)*2:0:0,"
             "scale=900:-1",
             "-q:v", "3",
@@ -68,7 +70,7 @@ def find_score_changes(video_path, duration_seconds):
         pending_count = 0
 
         for frame_index, frame_path in enumerate(frame_paths):
-            timestamp = float(frame_index)
+            timestamp = float(frame_index * 2)
 
             if timestamp >= duration_seconds:
                 break
