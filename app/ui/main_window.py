@@ -1,3 +1,4 @@
+from pathlib import Path
 
 from app.ui.pages import create_pages
 from app.ui.navigation import (
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QHBoxLayout,
     QMessageBox,
+    QFileDialog,
 )
 
 
@@ -37,13 +39,8 @@ class CreatorStudio(QMainWindow):
 
         sidebar, self.navigation_buttons = create_navigation(self)
 
-        # Создаём контроллеры до страниц.
         setup_controllers(self)
-
-        # Создаём рабочие страницы.
         self.pages = create_pages(self)
-
-        # Добавляем блок сборки после создания редактора.
         self.editor_sequence_controller.attach()
 
         main_layout.addWidget(sidebar)
@@ -54,10 +51,7 @@ class CreatorStudio(QMainWindow):
         self.load_exported_clips()
 
     def open_video_preview(self, row, column):
-        self.media_library_controller.open_video_preview(
-            row,
-            column
-        )
+        self.media_library_controller.open_video_preview(row, column)
 
     def update_media_selection_action(self):
         self.media_library_controller.update_selection_action()
@@ -75,10 +69,25 @@ class CreatorStudio(QMainWindow):
         self.editor_clips_controller.load_clips()
 
     def add_exported_clip(self, clip_path, save_settings=True):
-        self.editor_clips_controller.add_clip(
-            clip_path,
-            save_settings
+        self.editor_clips_controller.add_clip(clip_path, save_settings)
+
+    def browse_analysis_video(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Выбери запись матча",
+            str(Path.home()),
+            "Видеофайлы (*.mp4 *.mkv *.webm *.mov *.m4v);;Все файлы (*.*)",
         )
+        if not file_path:
+            return
+
+        self.moment_analysis_controller.set_source(file_path)
+
+    def start_moment_analysis(self):
+        self.moment_analysis_controller.start_analysis()
+
+    def open_analysis_candidate(self, row, column):
+        self.moment_analysis_controller.open_candidate(row)
 
     def switch_page(self, index):
         update_navigation_page(self, index)
