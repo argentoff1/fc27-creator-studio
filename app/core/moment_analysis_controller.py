@@ -54,6 +54,8 @@ class MomentAnalysisController:
 
         self.window.analysis_results_table.setRowCount(0)
         self.candidates = []
+        self.diagnostic_folder = ""
+        self.window.analysis_open_diagnostics_button.setEnabled(False)
         self.window.analysis_start_button.setEnabled(False)
         self.window.analysis_progress.setRange(0, 0)
         self.window.analysis_progress.setFormat("Распознавание табло и анализ видео/звука...")
