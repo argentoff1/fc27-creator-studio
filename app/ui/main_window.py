@@ -39,8 +39,10 @@ class CreatorStudio(QMainWindow):
 
         sidebar, self.navigation_buttons = create_navigation(self)
 
-        setup_controllers(self)
+        # Сначала создаём все страницы и их виджеты, затем контроллеры,
+        # которые подключают сигналы к этим виджетам.
         self.pages = create_pages(self)
+        setup_controllers(self)
         self.editor_sequence_controller.attach()
 
         main_layout.addWidget(sidebar)
