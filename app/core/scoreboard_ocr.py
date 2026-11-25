@@ -144,6 +144,7 @@ def find_score_changes(video_path, duration_seconds):
     pending_time = None
     pending_count = 0
     diagnostic_rows = []
+    decision_rows = []
 
     for frame_index, frame_path in enumerate(frame_paths):
         timestamp = float(frame_index * 2)
@@ -159,10 +160,21 @@ def find_score_changes(video_path, duration_seconds):
             ocr_error,
         ])
 
+        previous_confirmed = (
+            "" if confirmed_score is None
+            else f"{confirmed_score[0]}:{confirmed_score[1]}"
+        )
+        decision = "не распознано" if score is None else "ожидает подтверждения"
+        decision_detail = ocr_error
+
         if score is None:
             pending_score = None
             pending_time = None
             pending_count = 0
+            decision_rows.append([
+                f"{timestamp:.1f}", raw_text.replace("\n", " | "),
+                previous_confirmed, "", decision, decision_detail,
+            ])
             continue
 
         if score == pending_score and timestamp - pending_time <= 4.0:
@@ -173,13 +185,21 @@ def find_score_changes(video_path, duration_seconds):
             pending_count = 1
 
         if pending_count < 2:
+            decision_detail = f"Совпадение {pending_count}/2"
+            decision_rows.append([
+                f"{timestamp:.1f}", raw_text.replace("\n", " | "),
+                previous_confirmed, f"{score[0]}:{score[1]}",
+                decision, decision_detail,
+            ])
             continue
 
         if confirmed_score is None:
             confirmed_score = score
             confirmed_time = pending_time
+            decision = "подтверждено начальное значение"
         elif score == confirmed_score:
             confirmed_time = pending_time
+            decision = "подтверждён прежний счёт"
         else:
             arg_delta = score[0] - confirmed_score[0]
             opponent_delta = score[1] - confirmed_score[1]
@@ -192,6 +212,11 @@ def find_score_changes(video_path, duration_seconds):
             )
 
             if valid_increase:
+                decision = "ПЕРЕХОД ПРИНЯТ"
+                decision_detail = (
+                    f"Изменение {confirmed_score[0]}:{confirmed_score[1]} "
+                    f"→ {score[0]}:{score[1]}"
+                )
                 old_text = f"{confirmed_score[0]}:{confirmed_score[1]}"
                 new_text = f"{score[0]}:{score[1]}"
                 interval_start = confirmed_time or 0.0
@@ -231,6 +256,17 @@ def find_score_changes(video_path, duration_seconds):
 
                 confirmed_score = score
                 confirmed_time = pending_time
+            else:
+                decision = "переход отклонён"
+                decision_detail = (
+                    f"Недопустимый скачок: {arg_delta:+d}:{opponent_delta:+d}"
+                )
+
+        decision_rows.append([
+            f"{timestamp:.1f}", raw_text.replace("\n", " | "),
+            previous_confirmed, f"{score[0]}:{score[1]}",
+            decision, decision_detail,
+        ])
 
         pending_score = None
         pending_time = None
@@ -253,6 +289,46 @@ def find_score_changes(video_path, duration_seconds):
         return candidates, (
             "Распознавание завершено, но не удалось сохранить журнал OCR: "
             f"{error}"
+        )
+
+    try:
+        with (diagnostic_dir / "scoreboard_events.csv").open(
+            "w", newline="", encoding="utf-8-sig"
+        ) as csv_file:
+            writer = csv.writer(csv_file, delimiter=";")
+            writer.writerow([
+                "Время видео, сек",
+                "Ответ Tesseract",
+                "Счёт до проверки",
+                "Текущий счёт",
+                "Решение алгоритма",
+                "Пояснение",
+            ])
+            writer.writerows(decision_rows)
+
+        with (diagnostic_dir / "scoreboard_candidates.csv").open(
+            "w", newline="", encoding="utf-8-sig"
+        ) as csv_file:
+            writer = csv.writer(csv_file, delimiter=";")
+            writer.writerow([
+                "Время события, сек",
+                "Тип события",
+                "Начало фрагмента, сек",
+                "Конец фрагмента, сек",
+                "Количество голов",
+            ])
+            for candidate in candidates:
+                writer.writerow([
+                    f"{candidate['timestamp']:.1f}",
+                    candidate["kind"],
+                    f"{candidate['start']:.1f}",
+                    f"{candidate['end']:.1f}",
+                    candidate["goal_count"],
+                ])
+    except OSError as error:
+        return candidates, (
+            "Распознавание завершено, но не удалось сохранить "
+            f"журнал решений OCR: {error}"
         )
 
     return candidates, None
