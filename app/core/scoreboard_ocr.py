@@ -183,16 +183,22 @@ def find_score_changes(video_path, duration_seconds):
                         f"{int(interval_end // 60):02d}:"
                         f"{int(interval_end % 60):02d}"
                     )
-                    goal_text = (
-                        "гол" if total_delta == 1
-                        else f"{total_delta} гола(ов)"
-                    )
+                    last_two = total_delta % 100
+                    last_digit = total_delta % 10
+                    if 11 <= last_two <= 14:
+                        goal_word = "голов"
+                    elif last_digit == 1:
+                        goal_word = "гол"
+                    elif 2 <= last_digit <= 4:
+                        goal_word = "гола"
+                    else:
+                        goal_word = "голов"
                     candidates.append({
                         "timestamp": pending_time,
                         "duration": duration_seconds,
                         "kind": (
                             f"Изменение счёта ARG {old_text} → {new_text} "
-                            f"(+{total_delta}: {goal_text}{interval_text})"
+                            f"(+{total_delta} {goal_word}{interval_text})"
                         ),
                         "start": max(0.0, pending_time - 18.0),
                         "end": min(duration_seconds, pending_time + 18.0),
