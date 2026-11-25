@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QTableWidgetItem
 
 from app.core.moment_analysis import MomentAnalysisWorker
@@ -13,12 +14,19 @@ class MomentAnalysisController:
         self.source_path = None
         self.candidates = []
         self.worker = None
+        self.diagnostic_folder = ""
+        self.window.analysis_open_diagnostics_button.setEnabled(False)
+        self.window.analysis_open_diagnostics_button.clicked.connect(
+            self.open_diagnostics_folder
+        )
 
     def set_source(self, file_path):
         self.source_path = str(Path(file_path).resolve())
         self.window.analysis_source_input.setText(self.source_path)
         self.window.analysis_results_table.setRowCount(0)
         self.candidates = []
+        self.diagnostic_folder = ""
+        self.window.analysis_open_diagnostics_button.setEnabled(False)
         self.window.analysis_status_label.setText(
             "Видео выбрано. Будут проверены табло, видеоряд и аудиодорожка."
         )
@@ -56,8 +64,12 @@ class MomentAnalysisController:
         )
         self.worker.start()
 
-    def on_analysis_completed(self, candidates):
+    def on_analysis_completed(self, candidates, diagnostic_folder=""):
         self.candidates = candidates
+        self.diagnostic_folder = diagnostic_folder
+        self.window.analysis_open_diagnostics_button.setEnabled(
+            bool(diagnostic_folder and Path(diagnostic_folder).is_dir())
+        )
         table = self.window.analysis_results_table
         table.setRowCount(0)
 
@@ -99,12 +111,23 @@ class MomentAnalysisController:
                 f"(изменений счёта: {scoreboard_count}, "
                 f"аудиосигналов: {audio_count}, смен сцен: {scene_count}). "
                 "Дважды щёлкни по строке, чтобы открыть момент в монтаже."
+                + (
+                    f" Кадры смен сцен сохранены: {diagnostic_folder}"
+                    if diagnostic_folder else
+                    " Диагностические кадры смен сцен не сохранены."
+                )
             )
         else:
             self.window.analysis_status_label.setText(
                 "Изменений счёта, выраженных аудиовсплесков и заметных смен сцен "
                 "не найдено. "
                 "Попробуй повысить чувствительность."
+            )
+
+    def open_diagnostics_folder(self):
+        if self.diagnostic_folder and Path(self.diagnostic_folder).is_dir():
+            QDesktopServices.openUrl(
+                QUrl.fromLocalFile(self.diagnostic_folder)
             )
 
     def on_analysis_failed(self, message):
