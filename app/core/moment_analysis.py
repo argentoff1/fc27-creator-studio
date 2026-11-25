@@ -139,7 +139,7 @@ class MomentAnalysisWorker(QThread):
         ], None
 
     def _export_scene_diagnostics(self, path, timestamps):
-        """Сохраняет кадры до и после обнаруженных смен сцен."""
+        """Сохраняет последовательность кадров вокруг обнаруженных смен сцен."""
         output_dir = (
             PROJECT_ROOT / "reports" / "scene_diagnostics" / path.stem
         )
@@ -151,28 +151,31 @@ class MomentAnalysisWorker(QThread):
         except OSError:
             return ""
 
-        # Ограничиваем выборку 30 переходами, чтобы не создавать сотни файлов.
+        # Не более 20 переходов за один анализ: до 100 диагностических кадров.
         selected = timestamps
-        if len(selected) > 30:
-            step = (len(selected) - 1) / 29
-            selected = [selected[round(index * step)] for index in range(30)]
+        if len(selected) > 20:
+            step = (len(selected) - 1) / 19
+            selected = [selected[round(index * step)] for index in range(20)]
+
+        # Пять точек помогают увидеть развитие события, а не только два
+        # разрозненных кадра до и после перехода.
+        offsets = (
+            (-2.0, "minus_2s"),
+            (-1.0, "minus_1s"),
+            (0.0, "at_cut"),
+            (1.0, "plus_1s"),
+            (2.0, "plus_2s"),
+        )
 
         saved_count = 0
         for index, timestamp in enumerate(selected, start=1):
-            for sample_time, label in (
-                (timestamp - 0.5, "before"),
-                (timestamp + 0.5, "after"),
-            ):
+            for offset, label in offsets:
+                sample_time = timestamp + offset
                 if sample_time < 0:
                     continue
 
-                time_label = (
-                    f"{int(sample_time // 3600):02d}-"
-                    f"{int((sample_time % 3600) // 60):02d}-"
-                    f"{int(sample_time % 60):02d}"
-                )
                 image_path = output_dir / (
-                    f"scene_{index:02d}_{label}_{time_label}.jpg"
+                    f"scene_{index:02d}_{label}_{sample_time:09.3f}s.jpg"
                 )
                 command = [
                     str(FFMPEG_PATH), "-hide_banner", "-loglevel", "error",
