@@ -7,11 +7,11 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
-from app.core.media_probe import FFMPEG_PATH, probe_video
+from app.core.media_probe import FFMPEG_PATH, PROJECT_ROOT, probe_video
 from app.core.scoreboard_ocr import find_score_changes
 
 
-SCENE_TIME_PATTERN = re.compile(r"pts_time:([0-9]+(?:\\.[0-9]+)?)")
+SCENE_TIME_PATTERN = re.compile(r"pts_time:([0-9]+(?:\.[0-9]+)?)")
 
 AUDIO_SAMPLE_RATE = 8000
 AUDIO_WINDOW_SECONDS = 0.5
@@ -21,7 +21,7 @@ AUDIO_SAMPLES_PER_WINDOW = int(AUDIO_SAMPLE_RATE * AUDIO_WINDOW_SECONDS)
 class MomentAnalysisWorker(QThread):
     """Ищет смены сцен и заметные аудиовсплески в записи матча."""
 
-    completed = Signal(list)
+    completed = Signal(list, str)
     failed = Signal(str)
 
     def __init__(self, video_path, sensitivity=0.25, parent=None):
@@ -54,6 +54,7 @@ class MomentAnalysisWorker(QThread):
 
         candidates = []
         errors = []
+        diagnostic_folder = ""
 
         score_candidates, score_error = find_score_changes(
             path, duration_seconds
@@ -66,6 +67,9 @@ class MomentAnalysisWorker(QThread):
             path, duration_seconds
         )
         candidates.extend(scene_candidates)
+        if scene_candidates:
+            scene_times = [item["timestamp"] for item in scene_candidates]
+            diagnostic_folder = self._export_scene_diagnostics(path, scene_times)
         if scene_error:
             errors.append(scene_error)
 
@@ -82,7 +86,7 @@ class MomentAnalysisWorker(QThread):
             return
 
         candidates = self._merge_candidates(candidates)
-        self.completed.emit(candidates)
+        self.completed.emit(candidates, diagnostic_folder)
 
     def _find_scene_changes(self, path, duration_seconds):
         command = [
@@ -133,6 +137,62 @@ class MomentAnalysisWorker(QThread):
             }
             for timestamp in timestamps
         ], None
+
+    def _export_scene_diagnostics(self, path, timestamps):
+        """Сохраняет кадры до и после обнаруженных смен сцен."""
+        output_dir = (
+            PROJECT_ROOT / "reports" / "scene_diagnostics" / path.stem
+        )
+
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            for old_image in output_dir.glob("scene_*.jpg"):
+                old_image.unlink()
+        except OSError:
+            return ""
+
+        # Ограничиваем выборку 30 переходами, чтобы не создавать сотни файлов.
+        selected = timestamps
+        if len(selected) > 30:
+            step = (len(selected) - 1) / 29
+            selected = [selected[round(index * step)] for index in range(30)]
+
+        saved_count = 0
+        for index, timestamp in enumerate(selected, start=1):
+            for sample_time, label in (
+                (timestamp - 0.5, "before"),
+                (timestamp + 0.5, "after"),
+            ):
+                if sample_time < 0:
+                    continue
+
+                time_label = (
+                    f"{int(sample_time // 3600):02d}-"
+                    f"{int((sample_time % 3600) // 60):02d}-"
+                    f"{int(sample_time % 60):02d}"
+                )
+                image_path = output_dir / (
+                    f"scene_{index:02d}_{label}_{time_label}.jpg"
+                )
+                command = [
+                    str(FFMPEG_PATH), "-hide_banner", "-loglevel", "error",
+                    "-i", str(path), "-ss", f"{sample_time:.3f}",
+                    "-frames:v", "1", "-q:v", "3", "-y", str(image_path),
+                ]
+
+                try:
+                    result = subprocess.run(
+                        command, capture_output=True, text=True,
+                        encoding="utf-8", errors="replace",
+                        timeout=30, check=False,
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    continue
+
+                if result.returncode == 0 and image_path.is_file():
+                    saved_count += 1
+
+        return str(output_dir) if saved_count else ""
 
     def _find_audio_peaks(self, path, duration_seconds):
         command = [
