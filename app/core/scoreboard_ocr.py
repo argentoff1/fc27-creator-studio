@@ -122,6 +122,7 @@ def find_score_changes(video_path, duration_seconds):
             return [], "Не удалось извлечь кадры для распознавания табло."
 
         confirmed_score = None
+        confirmed_time = None
         pending_score = None
         pending_time = None
         pending_count = 0
@@ -151,28 +152,61 @@ def find_score_changes(video_path, duration_seconds):
 
             if confirmed_score is None:
                 confirmed_score = score
-            elif score != confirmed_score:
+                confirmed_time = pending_time
+            elif score == confirmed_score:
+                # Обновляем момент последнего надёжного чтения прежнего счёта.
+                # Это сужает интервал, если OCR пропустил отдельный кадр.
+                confirmed_time = pending_time
+            else:
                 arg_delta = score[0] - confirmed_score[0]
                 opponent_delta = score[1] - confirmed_score[1]
+                total_delta = arg_delta + opponent_delta
 
-                # Гол — увеличение счёта ровно на один у одной команды.
-                if (
-                    (arg_delta == 1 and opponent_delta == 0)
-                    or (arg_delta == 0 and opponent_delta == 1)
-                ):
+                # Счёт в матче не должен уменьшаться. Допускаем несколько
+                # голов между подтверждёнными чтениями, но ограничиваем скачок,
+                # чтобы не принимать случайную ошибку OCR за реальный результат.
+                valid_increase = (
+                    0 <= arg_delta <= 3
+                    and 0 <= opponent_delta <= 3
+                    and 1 <= total_delta <= 4
+                )
+
+                if valid_increase:
                     old_text = f"{confirmed_score[0]}:{confirmed_score[1]}"
                     new_text = f"{score[0]}:{score[1]}"
+                    interval_start = confirmed_time or 0.0
+                    interval_end = pending_time
+                    interval_text = (
+                        f"; интервал подтверждения "
+                        f"{int(interval_start // 60):02d}:"
+                        f"{int(interval_start % 60):02d}–"
+                        f"{int(interval_end // 60):02d}:"
+                        f"{int(interval_end % 60):02d}"
+                    )
+                    goal_text = (
+                        "гол" if total_delta == 1
+                        else f"{total_delta} гола(ов)"
+                    )
                     candidates.append({
                         "timestamp": pending_time,
                         "duration": duration_seconds,
-                        "kind": f"Изменение счёта ARG {old_text} → {new_text}",
+                        "kind": (
+                            f"Изменение счёта ARG {old_text} → {new_text} "
+                            f"(+{total_delta}: {goal_text}{interval_text})"
+                        ),
                         "start": max(0.0, pending_time - 18.0),
                         "end": min(duration_seconds, pending_time + 18.0),
                         "source": "scoreboard",
+                        "goal_count": total_delta,
+                        "score_interval_start": interval_start,
+                        "score_interval_end": interval_end,
                     })
 
-                # Новое подтверждённое значение становится точкой отсчёта.
-                confirmed_score = score
+                    # Только правдоподобное увеличение становится новой
+                    # точкой отсчёта. Падение счёта или слишком большой скачок
+                    # не должны ломать последующее распознавание.
+                    confirmed_score = score
+                    confirmed_time = pending_time
 
             pending_score = None
             pending_time = None
