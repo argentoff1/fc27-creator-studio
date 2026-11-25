@@ -176,7 +176,7 @@ class MomentAnalysisWorker(QThread):
                 )
                 command = [
                     str(FFMPEG_PATH), "-hide_banner", "-loglevel", "error",
-                    "-i", str(path), "-ss", f"{sample_time:.3f}",
+                    "-ss", f"{sample_time:.3f}", "-i", str(path),
                     "-frames:v", "1", "-q:v", "3", "-y", str(image_path),
                 ]
 
