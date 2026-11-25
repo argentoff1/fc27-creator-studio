@@ -33,10 +33,10 @@ def create_ai_assistant_page(window):
     title.setObjectName("PageTitle")
 
     description = QLabel(
-        "Поиск моментов по трём сигналам: изменения счёта на табло, "
-        "всплески громкости и смены сцен. Изменение счёта считается "
-        "кандидатом на гол; аудио и видеоряд помогают найти другие "
-        "интересные эпизоды."
+        "Поиск моментов по аудио и сменам сцен. Для диагностики "
+        "приложение сохраняет кадры непосредственно до и после "
+        "обнаруженных переходов, чтобы проверить распознавание "
+        "празднования и возврата к центральному кругу."
     )
     description.setObjectName("Subtitle")
     description.setWordWrap(True)
@@ -76,6 +76,12 @@ def create_ai_assistant_page(window):
 
     options_layout.addWidget(window.analysis_sensitivity_combo, 1)
     options_layout.addWidget(window.analysis_start_button)
+
+    window.analysis_open_diagnostics_button = QPushButton(
+        "Открыть диагностические кадры"
+    )
+    window.analysis_open_diagnostics_button.setEnabled(False)
+    options_layout.addWidget(window.analysis_open_diagnostics_button)
     layout.addLayout(options_layout)
 
     window.analysis_progress = QProgressBar()
