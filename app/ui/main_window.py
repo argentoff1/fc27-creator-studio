@@ -6,7 +6,10 @@ from app.ui.navigation import (
     switch_page as update_navigation_page
 )
 
-from app.core.controller_setup import setup_controllers
+from app.core.controller_setup import (
+    setup_editor_controllers,
+    setup_page_controllers,
+)
 from app.core.media_storage import setup_media_storage
 
 from PySide6.QtWidgets import (
@@ -39,10 +42,13 @@ class CreatorStudio(QMainWindow):
 
         sidebar, self.navigation_buttons = create_navigation(self)
 
-        # Сначала создаём все страницы и их виджеты, затем контроллеры,
-        # которые подключают сигналы к этим виджетам.
+        # Контроллеры редактора нужны уже во время создания страницы монтажа.
+        setup_editor_controllers(self)
+
+        # Страницы создают виджеты. После этого можно подключать контроллеры,
+        # которые обращаются к элементам интерфейса.
         self.pages = create_pages(self)
-        setup_controllers(self)
+        setup_page_controllers(self)
         self.editor_sequence_controller.attach()
 
         main_layout.addWidget(sidebar)
