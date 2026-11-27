@@ -1,64 +1,159 @@
 import csv
 import re
-from collections import Counter, deque
 import subprocess
+from collections import Counter, deque
 from pathlib import Path
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QImage, QPainter
 
 from app.core.media_probe import FFMPEG_PATH, PROJECT_ROOT
 
 
 TESSERACT_PATH = Path(
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
 )
 
-SCORE_PATTERN = re.compile(r"\d{1,2}")
+DIGIT_PATTERN = re.compile(r"[0-9Oo]")
+
+
+def _prepare_digit_crop(frame_path, row_name):
+    """Готовит отдельную увеличенную область верхней или нижней цифры."""
+    image = QImage(str(frame_path))
+    if image.isNull():
+        raise ValueError(f"Не удалось открыть изображение: {frame_path}")
+
+    width = image.width()
+    height = image.height()
+
+    # Исходный кадр — квадратная вырезка табло, увеличенная FFmpeg в 8 раз.
+    # Цифры находятся справа от эмблем, одна над другой.
+    x = round(width * 0.36)
+    crop_width = round(width * 0.25)
+    if row_name == "top":
+        y = round(height * 0.12)
+        crop_height = round(height * 0.28)
+    else:
+        y = round(height * 0.40)
+        crop_height = round(height * 0.30)
+
+    digit_crop = image.copy(x, y, crop_width, crop_height)
+    if digit_crop.isNull():
+        raise ValueError(f"Не удалось вырезать {row_name} цифру")
+
+    scaled = digit_crop.scaled(
+        850,
+        950,
+        Qt.AspectRatioMode.IgnoreAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+
+    # Чёрные поля помогают Tesseract отделить цифру от границ табло.
+    padded = QImage(
+        1050,
+        1150,
+        QImage.Format.Format_Grayscale8,
+    )
+    padded.fill(0)
+    painter = QPainter(padded)
+    painter.drawImage(100, 100, scaled)
+    painter.end()
+
+    crop_path = frame_path.with_name(
+        f"_{frame_path.stem}_{row_name}_ocr.png"
+    )
+    if not padded.save(str(crop_path), "PNG"):
+        raise OSError(f"Не удалось сохранить временный кадр: {crop_path}")
+    return crop_path
+
+
+def _run_tesseract_digit(image_path, psm):
+    command = [
+        str(TESSERACT_PATH),
+        str(image_path),
+        "stdout",
+        "--psm", str(psm),
+        "-c", "tessedit_char_whitelist=0123456789Oo",
+        "-c", "classify_bln_numeric_mode=1",
+    ]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=5,
+        check=False,
+    )
+    if result.returncode != 0:
+        error_text = (result.stderr or "").strip()
+        raise RuntimeError(
+            error_text or f"Tesseract exit code {result.returncode}"
+        )
+
+    raw = (result.stdout or "").strip().replace("\n", "")
+    matches = DIGIT_PATTERN.findall(raw)
+    if not matches:
+        return None, raw
+
+    # Иногда Tesseract захватывает соседний артефакт и выдаёт, например,
+    # «41». Для одиночной цифры берём последний распознанный символ.
+    character = matches[-1].lower()
+    digit = 0 if character == "o" else int(character)
+    return digit, raw
+
+
+def _read_digit(frame_path, row_name):
+    """Распознаёт одну цифру двумя режимами, третий использует при споре."""
+    crop_path = None
+    raw_parts = []
+    try:
+        crop_path = _prepare_digit_crop(frame_path, row_name)
+        first, raw_first = _run_tesseract_digit(crop_path, 8)
+        second, raw_second = _run_tesseract_digit(crop_path, 13)
+        raw_parts.extend([f"psm8={raw_first}", f"psm13={raw_second}"])
+
+        if first is not None and first == second:
+            return first, "; ".join(raw_parts), ""
+
+        third, raw_third = _run_tesseract_digit(crop_path, 10)
+        raw_parts.append(f"psm10={raw_third}")
+        votes = [value for value in (first, second, third) if value is not None]
+        if not votes:
+            return None, "; ".join(raw_parts), ""
+
+        counts = Counter(votes)
+        digit, count = counts.most_common(1)[0]
+        if count >= 2:
+            return digit, "; ".join(raw_parts), ""
+
+        return None, "; ".join(raw_parts), ""
+    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as error:
+        return None, "; ".join(raw_parts), str(error)
+    finally:
+        if crop_path is not None:
+            try:
+                crop_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _read_score_debug(frame_path):
-    """Возвращает распознанный счёт и полный текстовый ответ Tesseract."""
-    command = [
-        str(TESSERACT_PATH),
-        str(frame_path),
-        "stdout",
-        "--psm", "6",
-        "-c", "tessedit_char_whitelist=0123456789",
-        "-c", "classify_bln_numeric_mode=1",
-    ]
+    """Распознаёт верхнюю и нижнюю цифры независимо друг от друга."""
+    top, top_raw, top_error = _read_digit(frame_path, "top")
+    bottom, bottom_raw, bottom_error = _read_digit(frame_path, "bottom")
+    raw_text = f"Верх: [{top_raw}] | Низ: [{bottom_raw}]"
 
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=5,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        return None, "", str(error)
+    errors = [error for error in (top_error, bottom_error) if error]
+    error_text = " | ".join(errors)
 
-    raw_text = (result.stdout or "").strip()
-    if result.returncode != 0:
-        error_text = (result.stderr or "").strip()
-        return None, raw_text, error_text or f"Tesseract exit code {result.returncode}"
+    if top is None or bottom is None:
+        return None, raw_text, error_text
 
-    # Сохраняем исходный текст отдельно в диагностике. Парсер пока оставляем
-    # прежним, чтобы сначала увидеть фактическое поведение OCR.
-    numbers = []
-    for line in raw_text.splitlines():
-        matches = SCORE_PATTERN.findall(line)
-        if matches:
-            numbers.append(matches[0])
-
-    if len(numbers) != 2:
+    if top > 20 or bottom > 20:
         return None, raw_text, ""
 
-    score = (int(numbers[0]), int(numbers[1]))
-    if score[0] > 20 or score[1] > 20:
-        return None, raw_text, ""
-
-    return score, raw_text, ""
+    return (top, bottom), raw_text, error_text
 
 
 def _read_score(frame_path):
@@ -80,9 +175,6 @@ def find_score_changes(video_path, duration_seconds):
     video_path = Path(video_path)
     candidates = []
 
-    # По скриншотам пользователя табло занимает приблизительно X=5–16.5%,
-    # Y=5–13% кадра. Для OCR берём правую часть табло с обеими цифрами счёта,
-    # оставляя запас по краям, чтобы не обрезать контуры цифр.
     diagnostic_dir = (
         PROJECT_ROOT / "reports" / "scoreboard_diagnostics" / video_path.stem
     )
@@ -90,7 +182,13 @@ def find_score_changes(video_path, duration_seconds):
         diagnostic_dir.mkdir(parents=True, exist_ok=True)
         for old_file in diagnostic_dir.glob("score_*.png"):
             old_file.unlink()
+        for old_file in diagnostic_dir.glob("_score_*_ocr.png"):
+            old_file.unlink()
         for old_file in diagnostic_dir.glob("ocr_results.csv"):
+            old_file.unlink()
+        for old_file in diagnostic_dir.glob("scoreboard_events.csv"):
+            old_file.unlink()
+        for old_file in diagnostic_dir.glob("scoreboard_candidates.csv"):
             old_file.unlink()
     except OSError as error:
         return [], f"Не удалось создать папку диагностики OCR: {error}"
@@ -167,8 +265,6 @@ def find_score_changes(video_path, duration_seconds):
         decision = "не распознано" if score is None else "ожидает подтверждения"
         decision_detail = ocr_error
 
-        # Голосуем по пяти последним секундам. Один-два неудачных или
-        # ошибочных OCR-кадра больше не сбрасывают накопленное подтверждение.
         recent_reads.append((timestamp, score))
         valid_reads = [item for item in recent_reads if item[1] is not None]
         counts = Counter(item[1] for item in valid_reads)
@@ -275,7 +371,7 @@ def find_score_changes(video_path, duration_seconds):
             writer.writerow([
                 "Время видео, сек",
                 "Изображение",
-                "Ответ Tesseract",
+                "Ответ Tesseract (отдельные цифры)",
                 "Распознанный счёт",
                 "Ошибка OCR",
             ])
