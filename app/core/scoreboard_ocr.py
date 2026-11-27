@@ -138,8 +138,8 @@ def _read_digit(frame_path, row_name):
                 pass
 
 
-def _read_score_debug(frame_path):
-    """Распознаёт верхнюю и нижнюю цифры независимо друг от друга."""
+def _read_score_digits_debug(frame_path):
+    """Распознаёт цифры команд независимо, сохраняя частичные результаты."""
     top, top_raw, top_error = _read_digit(frame_path, "top")
     bottom, bottom_raw, bottom_error = _read_digit(frame_path, "bottom")
     raw_text = f"Верх: [{top_raw}] | Низ: [{bottom_raw}]"
@@ -147,18 +147,49 @@ def _read_score_debug(frame_path):
     errors = [error for error in (top_error, bottom_error) if error]
     error_text = " | ".join(errors)
 
+    if top is not None and top > 20:
+        top = None
+    if bottom is not None and bottom > 20:
+        bottom = None
+
+    return top, bottom, raw_text, error_text
+
+
+def _read_score_debug(frame_path):
+    top, bottom, raw_text, error_text = _read_score_digits_debug(frame_path)
     if top is None or bottom is None:
         return None, raw_text, error_text
-
-    if top > 20 or bottom > 20:
-        return None, raw_text, ""
-
     return (top, bottom), raw_text, error_text
 
 
 def _read_score(frame_path):
     score, _, _ = _read_score_debug(frame_path)
     return score
+
+
+def _vote_digit(recent_reads, digit_index):
+    """Голосует за одну цифру в скользящем временном окне."""
+    valid_reads = [
+        (timestamp, values[digit_index])
+        for timestamp, values in recent_reads
+        if values[digit_index] is not None
+    ]
+    if len(valid_reads) < 3:
+        return None, [], 0, len(valid_reads)
+
+    counts = Counter(value for _, value in valid_reads)
+    digit, count = counts.most_common(1)[0]
+    confidence = count / len(valid_reads)
+
+    # Одного большинства недостаточно: цифра должна иметь минимум 3
+    # подтверждения и занимать не менее 60% всех читаемых значений строки.
+    if count < 3 or confidence < 0.60:
+        return None, [], count, len(valid_reads)
+
+    supporting_times = [
+        timestamp for timestamp, value in valid_reads if value == digit
+    ]
+    return digit, supporting_times, count, len(valid_reads)
 
 
 def find_score_changes(video_path, duration_seconds):
@@ -239,8 +270,9 @@ def find_score_changes(video_path, duration_seconds):
 
     confirmed_score = None
     confirmed_time = None
-    recent_reads = deque(maxlen=5)
-    last_voted_score = None
+    # 15 секунд позволяют собрать редкие, но устойчивые OCR-чтения,
+    # не смешивая их с показаниями, которые были значительно раньше.
+    recent_reads = deque(maxlen=15)
     diagnostic_rows = []
     decision_rows = []
 
@@ -249,7 +281,14 @@ def find_score_changes(video_path, duration_seconds):
         if timestamp >= duration_seconds:
             break
 
-        score, raw_text, ocr_error = _read_score_debug(frame_path)
+        top_digit, bottom_digit, raw_text, ocr_error = (
+            _read_score_digits_debug(frame_path)
+        )
+        score = (
+            (top_digit, bottom_digit)
+            if top_digit is not None and bottom_digit is not None
+            else None
+        )
         diagnostic_rows.append([
             f"{timestamp:.1f}",
             str(frame_path.name),
@@ -265,52 +304,82 @@ def find_score_changes(video_path, duration_seconds):
         decision = "не распознано" if score is None else "ожидает подтверждения"
         decision_detail = ocr_error
 
-        recent_reads.append((timestamp, score))
-        valid_reads = [item for item in recent_reads if item[1] is not None]
-        counts = Counter(item[1] for item in valid_reads)
-        voted_score, vote_count = (None, 0)
-        if counts:
-            voted_score, vote_count = counts.most_common(1)[0]
+        recent_reads.append((timestamp, (top_digit, bottom_digit)))
+        top_vote, top_times, top_count, top_total = _vote_digit(
+            recent_reads, 1
+        )
+        bottom_vote, bottom_times, bottom_count, bottom_total = _vote_digit(
+            recent_reads, 2
+        )
 
-        if voted_score is None or vote_count < 3:
-            decision = "ожидание большинства"
-            decision_detail = f"Совпадений в окне: {vote_count}/5"
-        elif voted_score == last_voted_score:
-            decision = "большинство уже обработано"
-            decision_detail = f"Устойчивое значение {voted_score[0]}:{voted_score[1]}"
+        voted_score = None
+        vote_time = None
+        if top_vote is not None and bottom_vote is not None:
+            # Обе цифры должны подтверждаться свежими чтениями, иначе
+            # алгоритм может случайно собрать счёт из разных моментов.
+            latest_top = top_times[-1]
+            latest_bottom = bottom_times[-1]
+            if (
+                timestamp - latest_top <= 3.0
+                and timestamp - latest_bottom <= 3.0
+                and abs(latest_top - latest_bottom) <= 2.0
+            ):
+                voted_score = (top_vote, bottom_vote)
+                vote_time = max(top_times[0], bottom_times[0])
+
+        vote_description = (
+            f"Верх {top_vote if top_vote is not None else '—'} "
+            f"({top_count}/{top_total}); низ "
+            f"{bottom_vote if bottom_vote is not None else '—'} "
+            f"({bottom_count}/{bottom_total})"
+        )
+
+        if voted_score is None:
+            decision = "ожидание подтверждения цифр"
+            decision_detail = (
+                f"{vote_description}; требуется минимум 3 чтения "
+                "и согласованность цифр по времени"
+            )
+        elif voted_score == confirmed_score:
+            decision = "подтверждён прежний счёт"
+            decision_detail = (
+                f"Счёт {voted_score[0]}:{voted_score[1]} остаётся без изменений; "
+                f"{vote_description}"
+            )
+            # confirmed_time намеренно не обновляем: это время последнего
+            # изменения счёта, а не время последнего стабильного кадра.
         else:
-            last_voted_score = voted_score
-            supporting_times = [
-                item[0] for item in valid_reads if item[1] == voted_score
-            ]
-            vote_time = supporting_times[0]
-
             if confirmed_score is None:
                 confirmed_score = voted_score
                 confirmed_time = vote_time
                 decision = "подтверждено начальное значение"
-                decision_detail = f"Голосование 3 из 5: {voted_score[0]}:{voted_score[1]}"
-            elif voted_score == confirmed_score:
-                confirmed_time = vote_time
-                decision = "подтверждён прежний счёт"
-                decision_detail = f"Голосование 3 из 5: {voted_score[0]}:{voted_score[1]}"
+                decision_detail = (
+                    f"Начальный счёт {voted_score[0]}:{voted_score[1]}; "
+                    f"{vote_description}"
+                )
             else:
                 arg_delta = voted_score[0] - confirmed_score[0]
                 opponent_delta = voted_score[1] - confirmed_score[1]
                 total_delta = arg_delta + opponent_delta
 
+                # В футбольном матче за одно событие счёт меняется ровно
+                # на один гол одной из команд. Скачки OCR не меняют состояние.
                 valid_increase = (
-                    0 <= arg_delta <= 3
-                    and 0 <= opponent_delta <= 3
-                    and 1 <= total_delta <= 4
+                    arg_delta >= 0
+                    and opponent_delta >= 0
+                    and total_delta == 1
+                    and (
+                        (arg_delta == 1 and opponent_delta == 0)
+                        or (arg_delta == 0 and opponent_delta == 1)
+                    )
                 )
 
                 if valid_increase:
                     decision = "ПЕРЕХОД ПРИНЯТ"
                     decision_detail = (
                         f"Изменение {confirmed_score[0]}:{confirmed_score[1]} "
-                        f"→ {voted_score[0]}:{voted_score[1]}; голосование "
-                        f"{vote_count}/5"
+                        f"→ {voted_score[0]}:{voted_score[1]}; "
+                        f"{vote_description}"
                     )
                     old_text = f"{confirmed_score[0]}:{confirmed_score[1]}"
                     new_text = f"{voted_score[0]}:{voted_score[1]}"
@@ -323,28 +392,18 @@ def find_score_changes(video_path, duration_seconds):
                         f"{int(interval_end // 60):02d}:"
                         f"{int(interval_end % 60):02d}"
                     )
-                    last_two = total_delta % 100
-                    last_digit = total_delta % 10
-                    if 11 <= last_two <= 14:
-                        goal_word = "голов"
-                    elif last_digit == 1:
-                        goal_word = "гол"
-                    elif 2 <= last_digit <= 4:
-                        goal_word = "гола"
-                    else:
-                        goal_word = "голов"
 
                     candidates.append({
                         "timestamp": vote_time,
                         "duration": duration_seconds,
                         "kind": (
-                            f"Изменение счёта ARG {old_text} → {new_text} "
-                            f"(+{total_delta} {goal_word}{interval_text})"
+                            f"Гол: счёт ARG {old_text} → {new_text}"
+                            f"{interval_text}"
                         ),
                         "start": max(0.0, vote_time - 18.0),
                         "end": min(duration_seconds, vote_time + 18.0),
                         "source": "scoreboard",
-                        "goal_count": total_delta,
+                        "goal_count": 1,
                         "score_interval_start": interval_start,
                         "score_interval_end": interval_end,
                     })
@@ -353,7 +412,11 @@ def find_score_changes(video_path, duration_seconds):
                 else:
                     decision = "переход отклонён"
                     decision_detail = (
-                        f"Недопустимый скачок: {arg_delta:+d}:{opponent_delta:+d}"
+                        f"Недопустимый переход "
+                        f"{confirmed_score[0]}:{confirmed_score[1]} → "
+                        f"{voted_score[0]}:{voted_score[1]} "
+                        f"(дельта {arg_delta:+d}:{opponent_delta:+d}); "
+                        f"{vote_description}. Подтверждённый счёт сохранён."
                     )
 
         decision_rows.append([
