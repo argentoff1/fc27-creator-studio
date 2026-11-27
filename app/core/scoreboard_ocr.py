@@ -174,16 +174,17 @@ def _vote_digit(recent_reads, digit_index):
         for timestamp, values in recent_reads
         if values[digit_index] is not None
     ]
-    if len(valid_reads) < 3:
+    if len(valid_reads) < 2:
         return None, [], 0, len(valid_reads)
 
     counts = Counter(value for _, value in valid_reads)
     digit, count = counts.most_common(1)[0]
     confidence = count / len(valid_reads)
 
-    # Одного большинства недостаточно: цифра должна иметь минимум 3
-    # подтверждения и занимать не менее 60% всех читаемых значений строки.
-    if count < 3 or confidence < 0.60:
+    # Минимум два независимых кадра. Это позволяет не терять голы,
+    # когда Tesseract уверенно читает табло лишь несколько секунд.
+    # Порог 60% защищает от случайного совпадения двух разных цифр.
+    if count < 2 or confidence < 0.60:
         return None, [], count, len(valid_reads)
 
     supporting_times = [
@@ -337,7 +338,7 @@ def find_score_changes(video_path, duration_seconds):
         if voted_score is None:
             decision = "ожидание подтверждения цифр"
             decision_detail = (
-                f"{vote_description}; требуется минимум 3 чтения "
+                f"{vote_description}; требуется минимум 2 чтения "
                 "и согласованность цифр по времени"
             )
         elif voted_score == confirmed_score:
