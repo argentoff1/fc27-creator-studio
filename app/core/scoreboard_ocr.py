@@ -11,7 +11,7 @@ from app.core.media_probe import FFMPEG_PATH, PROJECT_ROOT
 
 
 TESSERACT_PATH = Path(
-    r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 )
 
 DIGIT_PATTERN = re.compile(r"[0-9Oo]")
