@@ -306,10 +306,10 @@ def find_score_changes(video_path, duration_seconds):
 
         recent_reads.append((timestamp, (top_digit, bottom_digit)))
         top_vote, top_times, top_count, top_total = _vote_digit(
-            recent_reads, 1
+            recent_reads, 0
         )
         bottom_vote, bottom_times, bottom_count, bottom_total = _vote_digit(
-            recent_reads, 2
+            recent_reads, 1
         )
 
         voted_score = None
